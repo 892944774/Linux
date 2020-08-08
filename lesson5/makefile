@@ -1,3 +1,3 @@
-test:test.c
-	gcc $^ -o $@
+test:test.cpp
+	gcc $^ -o $@ -g -lhello
 
