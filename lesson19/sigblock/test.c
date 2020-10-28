@@ -7,6 +7,7 @@ void sigcb(int signo)
     printf("signo is %d\n", signo);
 }
 
+
 int main()
 {
     signal(2, sigcb);
