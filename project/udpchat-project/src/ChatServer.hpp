@@ -7,7 +7,51 @@
 #include <iostream>
 #include <string>
 
+#include "ConnectionInfo.hpp"
+#include "tool.hpp"
+#include "UserManager.hpp"
+
 #define TCP_PORT 17878
+
+class TcpConnect
+{
+    public:
+        TcpConnect()
+        {
+            new_sock_ = -1;
+            server_ = NULL;
+        }
+
+        ~TcpConnect()
+        {
+
+        }
+
+        void SetSockFd(int fd)
+        {
+            new_sock_ = fd;
+        }
+
+        void SetServer(void* server)
+        {
+            server_ = server;
+        }
+
+        int GetSockFd()
+        {
+            return new_sock_;
+        }
+
+        void* GetServer()
+        {
+            return server_;
+        }
+    private:
+        int new_sock_;
+
+        //保存ChatServer这个类的this指针,确保在tcp的线程入口函数当中获取到用户管理模块的实例化指针
+        void* server_;
+};
 
 class ChatServer
 {
@@ -60,6 +104,18 @@ class ChatServer
                 return -3;
             }
 
+
+            std::string msg = "listen port is 17878";
+            Log(INFO, __FILE__, __LINE__, msg) << std::endl;
+            // LOG(INFO, "test") << std::endl;
+           
+            //创建用户管理模块指针
+            user_manager_ = new UserManager();
+            if(!user_manager_)
+            {
+                Log(INFO, __FILE__, __LINE__, msg) << std::endl;
+                return -1;
+            }
             //暂时没有考虑udp通信和登录注册模块，消息池的初始化
             return 0;
         }
@@ -94,26 +150,99 @@ class ChatServer
 
                 //正常接收
                 //创建线程，为客户端的登录和注册请求负责
+                TcpConnect* tc = new TcpConnect();
+                tc->SetSockFd(new_sock);
+                tc->SetServer((void*)this);
+
                 pthread_t tid;
-                int ret = pthread_create(&tid, NULL, LoginRegisterStart, NULL)
+                int ret = pthread_create(&tid, NULL, LoginRegisterStart, (void*)tc);
+                if(ret < 0)
                 {
-                    
+                    close(new_sock);
+                    delete tc;
+                    continue;
                 }
-            }
-        
+            }   
         }
-    private:
+
+private:
         static void* LoginRegisterStart(void* arg)
         {
             /*
+             * 1.分离自己，当线程退出之后，线程所占用的资源就被操作系统回收
+             * 2.接受一个自己的数据，判断请求的类型，根据不同的请求类型，调用不同的函数进行处理（注册和登录）
              * 1.注册
              * 2.登录
-             ** /
-              
+             **/
+            pthread_detach(pthread_self());
+            
+            TcpConnect* tc = (TcpConnect*)arg;
+            ChatServer* cs = (ChatServer*)tc->GetServer();
+            char ques_type = -1;
+
+            ssize_t recv_size = recv(tc->GetSockFd(), &ques_type, 1, 0);
+            if(recv_size < 0)
+            {
+                close(tc->GetSockFd());
+                return NULL;
+            }
+            
+            else if (recv_size == 0)
+            {
+                //recv_size为0表示对端连接关闭了
+                close(tc->GetSockFd());
+                return NULL;
+            }
+            
+            //接受回来了一个字节的数据
+            switch(ques_type)
+            {
+                case REGISTER_RESQ:
+                {
+                    //TODO
+                    //处理注册请求,DealRegister
+                    cs->DealRegister(tc->GetSockFd(), cs);
+                    break;
+                }
+                case LOGIN_RESQ:
+                {
+                    //处理登录请求,DealLogin
+                    break;
+                }
+            }    
         }
-        
-    private:
-        int tcp_sock_;
-        uint16_t tcp_port_;
-        int udp_sock_;
+
+        //不管登录成功还是注册失败，都要给客户端返回一个数据
+        int DealRegister(int new_sock, ChatServer* cs)
+        {
+            //继续从tcp连接当中接受注册数据，方法就是直接使用RegisterInfo函数接收
+            struct RegisterInfo ri;
+            ssize_t recv_size = recv(new_sock, &ri, sizeof(ri), 0);
+            if(recv_size < 0)
+            {
+                return -1;
+            }
+            else if(recv_size == 0)
+            {
+                close(new_sock);
+                return -2;
+            }
+
+            //正常接收到了
+            //需要将数据递交给用户管理模块，进行注册，并且将用户数据进行留存
+            //需要和用户管理模块进行交互了
+            //TODO
+            cs->user_manager_->DealRegister(ri.nick_name_, ri.school_, ri.passwd_);
+        }
+
+        int DealLogin()
+        {
+            //继续从tcp连接中接收登录数据，策略就是直接使用LoginInfo
+        }
+private:
+    int tcp_sock_;
+    uint16_t tcp_port_;
+    int udp_sock_;
+
+    UserManager* user_manager_;
 };
