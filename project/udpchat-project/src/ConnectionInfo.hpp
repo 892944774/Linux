@@ -3,6 +3,8 @@
 #include <string.h>
 #include <iostream>
 
+#define TCP_PORT 17878
+
 //注册请求的数据格式
 //1.昵称 2.学校 3.用户密码
 //clinet to server 严格按照RegisterInfo传输数据
@@ -37,7 +39,7 @@ struct LoginInfo
 //2. 返回用户ID，类似于注册完毕之后的QQ号
 struct ReplyInfo
 {
-    int resp_status;
+    int resp_status_;
     uint32_t id_;
 };
 

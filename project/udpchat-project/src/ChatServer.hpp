@@ -5,13 +5,14 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <iostream>
+#include <pthread.h>
 #include <string>
 
 #include "ConnectionInfo.hpp"
-#include "tool.hpp"
 #include "UserManager.hpp"
+#include "tool.hpp"
 
-#define TCP_PORT 17878
+#define MAX_ROUND_COUNT 10
 
 class TcpConnect
 {
@@ -42,14 +43,14 @@ class TcpConnect
             return new_sock_;
         }
 
-        void* GetServer()
+        void* Getserver()
         {
             return server_;
         }
     private:
         int new_sock_;
 
-        //保存ChatServer这个类的this指针,确保在tcp的线程入口函数当中获取到用户管理模块的实例化指针
+        //保存ChatServer这个类的this指针，确保在tcp的线程入口函数当中可以获取到用户管理模块的实例化指针
         void* server_;
 };
 
@@ -105,17 +106,8 @@ class ChatServer
             }
 
 
-            std::string msg = "listen port is 17878";
-            Log(INFO, __FILE__, __LINE__, msg) << std::endl;
-            // LOG(INFO, "test") << std::endl;
-           
-            //创建用户管理模块指针
-            user_manager_ = new UserManager();
-            if(!user_manager_)
-            {
-                Log(INFO, __FILE__, __LINE__, msg) << std::endl;
-                return -1;
-            }
+            Log(INFO, __FILE__, __LINE__, "listen port is ") << tcp_port << std::endl;
+
             //暂时没有考虑udp通信和登录注册模块，消息池的初始化
             return 0;
         }
@@ -175,9 +167,8 @@ private:
              * 2.登录
              **/
             pthread_detach(pthread_self());
-            
             TcpConnect* tc = (TcpConnect*)arg;
-            ChatServer* cs = (ChatServer*)tc->GetServer();
+            ChatServer* cs = (ChatServer*)tc->Getserver();
             char ques_type = -1;
 
             ssize_t recv_size = recv(tc->GetSockFd(), &ques_type, 1, 0);
@@ -194,26 +185,66 @@ private:
                 return NULL;
             }
             
-            //接受回来了一个字节的数据
+            //接受回来了一个字节的数据 
+            int resp_status = -1;
+            uint32_t user_id;
             switch(ques_type)
             {
                 case REGISTER_RESQ:
-                {
-                    //TODO
-                    //处理注册请求,DealRegister
-                    cs->DealRegister(tc->GetSockFd(), cs);
-                    break;
-                }
+                    {
+                        //TODO
+                        //处理注册请求,DealRegister
+                        resp_status = cs->DealRegister(tc->GetSockFd(), &user_id);
+                        break;
+                    }
                 case LOGIN_RESQ:
-                {
-                    //处理登录请求,DealLogin
-                    break;
-                }
+                    {
+                        //处理登录请求,DealLogin
+                        resp_status = cs->DealLogin(tc->GetSockFd(), &user_id);
+                        break;
+                    }
             }    
+
+            //响应的构造
+            //struct ReplyInfo
+            //status
+            //userid
+            //send进行发送
+            
+            struct ReplyInfo ri;
+            ri.resp_status_ = resp_status;
+            ri.id_ = user_id;
+
+            LOG(INFO, "resp_status is") << ri.resp_status_ << std::endl;
+            LOG(INFO, "id is ") << ri.id_ << std::endl;
+
+            int max_round_count = MAX_ROUND_COUNT;
+            while(max_round_count > 0)
+            {
+                
+                ssize_t send_size = send(tc->GetSockFd(), &ri, sizeof(ri), 0);
+                if(send_size >= 0)
+                {  
+                    LOG(INFO, "Send reply uccess") << std::endl;
+                    break;
+                }   
+                /*
+                *发送失败之后，是否需要重复发送？需不需要将待发送的数据缓存起来
+                **/
+                LOG(WARNING, "Send reply failed") << std::endl;
+                max_round_count--;
+            }
+
+            //关闭当前的套接字
+            close(tc->GetSockFd());
+            delete tc;
+            tc = NULL;
+            return NULL;
         }
 
-        //不管登录成功还是注册失败，都要给客户端返回一个数据
-        int DealRegister(int new_sock, ChatServer* cs)
+private:
+        //不管登录成功还是注册失败，都要给客户端返回一个应答
+        int DealRegister(int new_sock, uint32_t* user_id)
         {
             //继续从tcp连接当中接受注册数据，方法就是直接使用RegisterInfo函数接收
             struct RegisterInfo ri;
@@ -232,13 +263,44 @@ private:
             //需要将数据递交给用户管理模块，进行注册，并且将用户数据进行留存
             //需要和用户管理模块进行交互了
             //TODO
-            cs->user_manager_->DealRegister(ri.nick_name_, ri.school_, ri.passwd_);
+            int ret = user_manager_->DealRegister(ri.nick_name_, ri.school_, ri.passwd_, user_id);
+            if(ret < 0)
+            {
+                //注册失败
+                return REGISTER_FAILED;
+            }
+
+            //注册成功
+            return REGISTER_SUCCESS;
         }
 
-        int DealLogin()
+        int DealLogin(int new_sock, uint32_t* user_id)
         {
             //继续从tcp连接中接收登录数据，策略就是直接使用LoginInfo
+            struct LoginInfo li;
+
+            ssize_t recv_size = recv(new_sock, &li, sizeof(li), 0);
+            if(recv_size < 0)
+            {
+                return -1;
+            }
+            else if(recv_size == 0)
+            {
+                close(new_sock);
+                return -2;
+            }
+
+            *user_id = li.id_;
+            //正常逻辑
+            //TODO 调用管理模块，判断登录请求id和密码是否正确
+            int ret = user_manager_->DealLogin(li.id_, li.passwd_);
+            if(ret < 0)
+            {
+                return LOGIN_FAILED;
+            }
+            return LOGIN_SUCCESS;
         }
+
 private:
     int tcp_sock_;
     uint16_t tcp_port_;

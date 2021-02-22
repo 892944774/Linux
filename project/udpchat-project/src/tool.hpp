@@ -28,7 +28,7 @@ class TimeStamp
 enum LogLevel
 {
     INFO = 0,
-    WARING,
+    WARNING,
     ERROR,
     FATAL,
     DEBUG
@@ -51,7 +51,7 @@ const char* LevelInfo[] =
  * __FILE__ __LINE__     获取源文件的名称和行号
  * */
 
-std::ostream& Log(LogLevel loglevel, char* file, int line, const std::string msg)
+std::ostream& Log(LogLevel loglevel,const char* file, int line, const std::string msg)
 {
     std::string timestamp;
     TimeStamp::GetTimeStamp(&timestamp);
@@ -61,4 +61,4 @@ std::ostream& Log(LogLevel loglevel, char* file, int line, const std::string msg
     return std::cout;
 }
 
-#define LOG(loglevel, msg) log(loglevel, __FILE__, __LINE__, msg)
+#define LOG(loglevel, msg) Log(loglevel, __FILE__, __LINE__, msg)
