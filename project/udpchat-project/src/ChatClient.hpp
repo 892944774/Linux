@@ -1,12 +1,17 @@
 #pragma once
+#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <iostream>
 #include <string>
+#include <unordered_map>
+#include <vector>
+using namespace std;
 
 #include "ConnectionInfo.hpp"
 #include "tool.hpp"
+#include "UserManager.hpp"
 
 struct MySelf
 {
@@ -19,9 +24,19 @@ struct MySelf
 class UdpClient
 {
     public:
-        UdpClient()
+        UdpClient(const std::string& ip)
         {
             tcp_sock_ = -1;
+            udp_sock_ = socket(AF_INET, SOCK_DGRAM, 0);
+            if(udp_sock_ < 0)
+            {
+                LOG(ERROR, "create udp socket failed") << endl;
+                exit(0);
+            }
+
+            ip_ = ip;
+
+            vec_.clear();
         }
 
         ~UdpClient()
@@ -88,9 +103,11 @@ class UdpClient
             std::cout << "please enter nick-name: ";
             fflush(stdout);
             std::cin >> ri.nick_name_;
+            me_.nick_name_ = ri.nick_name_;
             std::cout << "please enter school: ";
             fflush(stdout);
             std::cin >> ri.school_;
+            me_.school_ = ri.school_;
             /*
              * 对于密码字段而言，我们需要进行双重校验，防止用户在输入密码的时候，第一次输入错误
              * */
@@ -107,6 +124,7 @@ class UdpClient
                 if(first_passwd == second_passwd)
                 {
                     strncpy(ri.passwd_, first_passwd.c_str(), sizeof(ri.passwd_));
+                    me_.passwd_ = first_passwd;
                     break;
                 }
             }
@@ -128,6 +146,8 @@ class UdpClient
             else if(recv_size == 0)
             {
                 LOG(ERROR, "udpchat srver shutdown connect") << std::endl;
+                CloseFd();
+                return -1;
             }
 
             //6.判断应答结果
@@ -138,8 +158,112 @@ class UdpClient
             }
             //7.返回给上层调用者注册的结果
             LOG(INFO, "register success") << std::endl;
+            me_.user_id_ = reply_info.id_;
             return 0;
         }
+        
+        int LoginToSvr()
+        {
+            //1.创建套接字
+            int ret = CreateSock();
+            if(ret < 0)
+            {
+                return -1;
+            }
+
+            //2.连接服务器
+            ret = ConnectoSvr();
+            if(ret < 0)
+            {
+                return -1;
+            }
+
+            //3.发送类型
+            char type = LOGIN_RESQ;
+            ssize_t send_size = send(tcp_sock_, &type, 1, 0);
+            if(send_size < 0)
+            {
+                LOG(ERROR, "send login packet failed") << endl;
+                return -1;
+            }
+
+            //4.发送登录包
+            struct LoginInfo ri;
+            ri.id_ = me_.user_id_;
+            strncpy(ri.passwd_, me_.passwd_.c_str(), sizeof(ri.passwd_));
+            send_size = send(tcp_sock_, &ri, sizeof(ri), 0);
+            if(send_size < 0)
+            {
+                LOG(ERROR, "send login packet failed") << endl;
+                return -1;
+            }
+
+            //5.接受应答
+            struct ReplyInfo reply_info;
+            ssize_t recv_size = recv(tcp_sock_. &reply_info, sizeof(reply_info), 0);
+            if(recv_size < 0)
+            {
+                LOG(ERROR, "recv failed") << endl;
+            }
+            else if(recv_size == 0)
+            {
+                CloseFd();
+                LOG(ERROR, "server shutdown") << endl;
+                return -1;
+            }
+
+            //6.分析应答数据
+            if(reply_info.resp_status_ != LOGIN_SUCCESS)
+            {
+                LOG(ERROR, "recv status not LOGIN_SUCCESS") << endl;
+                return -1;
+            }
+
+            LOG(INFO, "login success") << endl;
+            return 0;
+        }
+
+        void CloseFd()
+        {
+            if(tcp_sock_ > 0)
+            {
+                close(tcp_sock_);
+                tcp_sock_ = -1;
+            }
+        }
+
+        int SendUdpMsg(const string& msg)
+        {
+            struct sockaddr_in addr;
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(UDP_PORT);
+            addr.sin_addr.s_addr = inet_addr(ip_.c_str());
+
+            ssize_t send_size = sendto(udp_sock_, msg.c_str(), msg.size(), 0, (struct sockaddr*)&addr, sizeof(addr));
+            if(send_size < 0)
+            {
+                LOG(ERROR, "send udp mag failed") << endl;
+            }
+            return 0;
+        }
+
+        int RecvUdpMsg(string* msg)
+        {
+            char buf[UDP_MAX_DATA_LEN] = {0};
+            ssize_t recv_size = recvfrom(udp_sock_, buf, sizeof(buf) - 1, 0, NULL, NULL);
+            if(recv_size < 0)
+            {
+                return -1;
+            }
+            msg->assign(buf, strlen(buf));
+            return 0;
+        }
+
     private: 
         int tcp_sock_; 
+
+        MySelf me_;
+        int udp_sock_;
+        string ip_;
+        vector<UdpMsg> vec_;
 };

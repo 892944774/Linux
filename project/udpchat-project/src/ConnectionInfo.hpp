@@ -3,7 +3,12 @@
 #include <string.h>
 #include <iostream>
 
+#include <json/json.h>
+
 #define TCP_PORT 17878
+#define UDP_PORT 17878
+
+#define UDP_MAX_DATA_LEN 10240
 
 //注册请求的数据格式
 //1.昵称 2.学校 3.用户密码
@@ -47,9 +52,10 @@ struct ReplyInfo
 enum Status
 {
     REGISTER_FAILED = 0,
-    REGISTER_SUCCESS,
-    LOGIN_FAILED,
-    LOGIN_SUCCESS 
+    REGISTER_SUCCESS = 1,
+    LOGIN_FAILED = 2,
+    LOGIN_SUCCESS = 3,
+    ONLINE = 4
 };
 
 //如何标识当前的请求是注册请求还是登录请求

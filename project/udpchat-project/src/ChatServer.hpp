@@ -7,12 +7,15 @@
 #include <iostream>
 #include <pthread.h>
 #include <string>
+using namespace std;
 
 #include "ConnectionInfo.hpp"
 #include "UserManager.hpp"
 #include "tool.hpp"
+#include "MessagePool.hpp"
 
 #define MAX_ROUND_COUNT 10
+#define THREAD_COUNT 1
 
 class TcpConnect
 {
@@ -62,10 +65,23 @@ class ChatServer
             //登录注册
             tcp_sock_ = -1;
             tcp_port_ = TCP_PORT;
+            user_manager_ = NULL;
+            udp_sock_ = -1;
+            udp_sock_ = UDP_PORT;
+            memset(con_tid_, '\0', THREAD_COUNT*sizeof(pthread_t));
+            memset(pro_tid_, '\0', THREAD_COUNT*sizeof(pthread_t));
+            msg_pool_ = NULL;
+            udp_msg = NULL;
         }
         
         ~ChatServer()
-        {}
+        {
+            if(user_manager_)
+            {
+                delete user_manager_;
+                user_manager_ = NULL;
+            }
+        }
 
         /*
          * 初始化变量的接口，被调用者调用的接口
@@ -73,6 +89,14 @@ class ChatServer
          * */
         int InitSvr(uint16_t tcp_port = TCP_PORT)
         {
+            //创建消息池
+            msg_pool_ = new MsgPool(1024);
+            if(msg_pool_ == NULL)
+            {
+                LOG(ERROR, "init msgpool failed") << endl;
+                return -1;
+            }
+
             //1.创建tcp_socket,绑定地址信息，监听
             //注册登录模块
             tcp_sock_ = socket(AF_INET, SOCK_STREAM, 0);
@@ -90,7 +114,7 @@ class ChatServer
              * 1.将点分十进制的IP地址转换为uint32_t
              * 2.将unit32_t从主机字节序转换为网络字节序
              *
-             * "0.0.0.0"
+             * "0.0.0.0"：代表侦听当前机器中的任意网卡信息
              * */
             int ret = bind(tcp_sock_,(struct sockaddr*)&addr, sizeof(addr));
             if(ret < 0)
@@ -109,8 +133,26 @@ class ChatServer
             Log(INFO, __FILE__, __LINE__, "listen port is ") << tcp_port << std::endl;
 
             //暂时没有考虑udp通信和登录注册模块，消息池的初始化
+            udp_sock_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+            if(udp_sock_ < 0)
+            {
+                LOG(ERROR, "create udp socket failed") << endl;
+                return -1;
+            }
+
+            ret = bind(udp_sock_, (struct sockaddr*)&addr, sizeof(addr));
+            if(ret < 0)
+            {
+                LOG(ERROR, "bind udp port failed") << endl;
+                return -2;
+            }
+
+            LOG(INFO, "udp bind port is") << UDP_PORT << endl;
+            LOG(INFO, "Server init success...") << endl;
+
             return 0;
         }
+
 
         /*
          * 启动线程
@@ -128,8 +170,24 @@ class ChatServer
              * tcp是否创建线程，取决于accept函数是否调用成功
              * */
 
-            //TODO
             //udp 线程的创建
+            for(int i = 0; i < THREAD_COUNT; i++)
+            {
+                int ret = pthread_create(&con_tid_[i], NULL, ConsumeStart, (void*)this);
+                if(ret < 0)
+                {
+                    LOG(ERROR, "Start udp thread failed") << endl;
+                    return -1;
+                }
+
+                ret = pthread_create(&pro_tid_[i], NULL, ProductStart, (void*)this);
+                if(ret < 0)
+                {
+                    LOG(ERROR, "Start udp thread failed") << endl;
+                    return -1;
+                }
+            }
+
             struct sockaddr_in peer_addr;
             socklen_t peer_addrlen = sizeof(peer_addr);
             while(1)
@@ -262,7 +320,6 @@ private:
             //正常接收到了
             //需要将数据递交给用户管理模块，进行注册，并且将用户数据进行留存
             //需要和用户管理模块进行交互了
-            //TODO
             int ret = user_manager_->DealRegister(ri.nick_name_, ri.school_, ri.passwd_, user_id);
             if(ret < 0)
             {
@@ -301,10 +358,43 @@ private:
             return LOGIN_SUCCESS;
         }
 
+        int RecvMsg()
+        {
+            /*
+             * 1. 接收udp数据
+             * 2. 判断该用户是否是登录用户
+             * 3. 判断该用户是否是第一次发送udp数据
+             * 如果是：需要保存该用户的udp数据，并且将该用户放到在线用户列表中
+             * 如果不是：说明这个用户就是老用户，之前已经保存了该用户的udp地址信息
+             * 4. 将数据发送到消息池中
+             * */
+            char buf[UDP_MAX_DATA_LEN] = {0};
+            struct sockaddr_in peer_addr;
+            socklen_t peer_addr_len = sizeof(peer_addr);
+            ssize_t recv_size = recvfrom(udp_sock_, buf, sizeof(buf) -1), 0, (struct sockaddr*)&peer_addr, &peer_addr_len);
+        if(recv_size < 0)
+        {
+            perror(recvfrom);
+            sleep(1);
+            LOG(ERROR, "recv udp msg failed") << endl;
+            return -1;
+        }
+        }
+
+
 private:
     int tcp_sock_;
     uint16_t tcp_port_;
     int udp_sock_;
+    uint16_t udp_port_;
 
     UserManager* user_manager_;
+
+    //udp线程的标识符数组
+    pthread_t con_tid_[THREAD_COUNT];
+    pthread_t pro_tid_[THREAD_COUNT];
+
+    MsgPool* msg_pool_;
+
+    UdpMsg* udp_msg;
 };
