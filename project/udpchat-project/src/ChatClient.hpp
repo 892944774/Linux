@@ -30,7 +30,7 @@ class UdpClient
             udp_sock_ = socket(AF_INET, SOCK_DGRAM, 0);
             if(udp_sock_ < 0)
             {
-                LOG(ERROR, "create udp socket failed") << endl;
+                LOG(ERROR, "create udp socket failed") << std::endl;
                 exit(0);
             }
 
@@ -50,7 +50,7 @@ class UdpClient
             if(tcp_sock_ < 0)
             {
                 LOG(ERROR, "create socket failed") << std::endl;
-                 return -1;
+                return -1;
             }
             /*
              * 为了在客户端可以在同一台机器上多开，我们不主动绑定端口
@@ -71,13 +71,13 @@ class UdpClient
             int ret = connect(tcp_sock_,(struct sockaddr*)&dest_addr, sizeof(dest_addr));
             if(ret < 0)
             {
-                LOG(ERROR, "Connect server failed, addr is") << ip << ":" << TCP_PORT << std::endl;
+                LOG(ERROR, "Connect server failed, addr is") << ip_ << ":" << TCP_PORT << std::endl;
                 return -1;
             }
             return 0;
         }  
 
-        int RegistertoSvr(const std::string& ip)
+        int RegistertoSvr()
         {
             //1.创建套接字
             int ret = CreateSock();
@@ -86,7 +86,7 @@ class UdpClient
                 return -1;
             }
             //2.连接服务器
-            ret = ConnectoSvr(ip);
+            ret = ConnectoSvr();
             if(ret < 0)
             {
                 return -1;

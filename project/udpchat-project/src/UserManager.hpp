@@ -1,9 +1,13 @@
 #pragma once 
 #include <string.h>
+#include <arpa/inet.h>
+#include <string.h>
+#include <sys/socket.h>
 #include <pthread.h>
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "ConnectionInfo.hpp"
 
@@ -33,6 +37,10 @@ class UserInfo
             school_ = school;
             passwd_ = passwd;
             user_id_ = user_id;
+            user_status_ = REGISTER_FAILED;
+
+            //新增udp地址信息的初始化
+            memset((void*)&addr_, '\0', sizeof(struct sockaddr_in));
         }
 
         ~UserInfo()
@@ -40,11 +48,35 @@ class UserInfo
 
         }
 
-        std::string& GetPasswd()
+        void SetUserStatus(int status)
         {
-            return passwd_;
+            user_status_ = status;
         }
 
+        int GetUserStatus()
+        {
+            return user_status_;                    
+        }
+
+        void SeraddrInfo(struct sockaddr_in addr)
+        {
+            memcpy(&addr_, &addr, sizeof(addr));
+        }
+
+        void SetaddrLenInfo(socklen_t addr_len)
+        {
+            addr_len_ = addr_len;
+        }
+
+        struct sockaddr_in& GetAddrInfo()
+        {
+            return addr_;
+        }
+
+        socklen_t GetAddrLen()
+        {
+            return addr_len_;
+        }
     private:
         std::string nick_name_;
         std::string school_;
@@ -52,6 +84,12 @@ class UserInfo
 
         //用户id
         uint32_t user_id_;
+
+        int user_status_;
+
+        //新增udp地址信息
+        struct sockaddr_in addr_;
+        socklen_t addr_len_;
 };
 
 class UserManager
@@ -83,7 +121,8 @@ class UserManager
             //3.分配用户id
             UserInfo ui(nick_name, school, passwd, prepare_id_);
             *user_id = prepare_id_;
-            //TODO 需要更改当前用户的状态 
+            //需要更改当前用户的状态 
+            ui.SetUserStatus(REGISTER_SUCCESS);
              
             //4.将用户的数据插入到map当中
             user_map_.insert(std::make_pair(prepare_id_, ui));
@@ -115,7 +154,7 @@ class UserManager
             iter = user_map_.find(id);
             if(iter == user_map_.end())
             {
-
+                pthread_mutex_unlock(&map_lock_);
                 return -2;
             }
 
@@ -123,11 +162,13 @@ class UserManager
             std::string reg_passwd = iter->second.GetPasswd();
             if(reg_passwd != passwd)
             {
+                iter->second.SetUserStatus(LOGIN_FAILED);
                 pthread_mutex_unlock(&map_lock_);
                 return -3;
             }
 
             //密码对比成功
+            iter->second.SetUserStatus(LOGIN_SUCCESS);
             pthread_mutex_unlock(&map_lock_);
             return 0;
         }
@@ -141,4 +182,7 @@ class UserManager
 
         //预分配的用户id,当用户管理模块接收到的注册请求之后，将prepare_id分配给注册的用户，分配完毕之后，需要对prepare_id进行更新
         uint32_t prepare_id_;
+
+        //保存的都是在线用户
+        std::vector<UserInfo> Online_user_;
 };

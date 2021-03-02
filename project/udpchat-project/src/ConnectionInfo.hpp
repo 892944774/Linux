@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <iostream>
+using namespace std;
 
 #include <json/json.h>
 
@@ -68,4 +69,55 @@ enum ResqType
 {
     REGISTER_RESQ = 0,
     LOGIN_RESQ
+};
+
+//双发约定UDP的数据格式
+
+class UdpMsg
+{
+    public:
+        UdpMsg()
+        {}
+
+        ~UdpMsg()
+        {}
+
+        /*
+         * 序列化接口，就是将对象转化为二进制的过程
+         * 为了将二进制通过网络接口传输到对端
+         * */
+
+        void serialize(std::string* msg)
+        {
+            Json::Value json_msg;
+
+            json_msg["nick_name"] = nick_name_;
+            json_msg["school"] = school_;
+            json_msg["user_id"] = user_id_;
+            json_msg["msg"] = msg_;
+
+            Json::FastWriter writer;
+            *msg = writer.write(json_msg);
+        }
+
+        /* 反序列化接口，就是将二进制转化成对象的过程
+         * 为了将网络当中接受的数据，反序列化成为我们认识的字符串
+         * */
+        void* deserialize(string msg)
+        {
+            Json::Reader reader;
+            Json::Value val;
+            reader.parse(msg, val);
+
+            nick_name_ = val["nick_name"].asString();
+            school_ = val["school"].asString();
+            user_id_ = val["user_id"].asUInt();
+            msg_ = val["msg"].asString();
+        }
+
+    public:
+        string nick_name_;
+        string school_;
+        uint32_t user_id_;
+        string msg_;
 };
